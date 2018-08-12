@@ -53,7 +53,10 @@ void activateTask(u8b index){
 }
 
 void chainTask(u8b index){
-	
+	Tasks[runningTask].STATE=IDLE;
+	Tasks[index].STATE=RUN;
+	runningTask=index;
+	Tasks[index].TASK_INITIAL_ADDR();
 }
 
 void terminateTask(){
@@ -73,7 +76,8 @@ void terminateTask(){
 	if(pendingTasks){
 		Tasks[hpt].STATE=RUN;
 		runningTask=hpt;
-		(void) Tasks[hpt].RETURN_ADDR;
+		(void) Tasks[hpt].RETURN_ADDR;		//Vuelve eventualmente a Task A pero pasa por otras lineas antes
+							//Deberia de correr directamente a Task A RETURN_ADDR;
 	}
 }
 
