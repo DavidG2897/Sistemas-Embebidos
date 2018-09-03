@@ -7,19 +7,25 @@ char a,b,c;
 void taskA(){
 	a = 5;
 	b = 10;
-	activateTask(1,FALSE);		//User-defined index for task B
-	c = c + a + b;
+	activateTask(2,FALSE);		//User-defined index for task B
+	u32b x=0;
+	if(readMailbox(0,&x)){
+		wait();
+		readMailbox(0,&x);
+	}
+	c = c + a + b + x;
 	terminateTask();
 }
 
 void taskB(){
 	c++;
-	//chainTask(2);
+	if(writeMailbox(0,5)) wait();	//writeMailbox returns 1 if write was unsuccesfull
 	terminateTask();
 }
 
 void taskC(){
-	c*=2;
+	c+=2;
+	//activateTask(1,FALSE);
 	terminateTask();
 }
 
@@ -37,19 +43,23 @@ int main(void){
 	
 	NVICICER1|=1<<(59%32);	//Clear PORT A interrupt flag
 	NVICISER1|=1<<(59%32); 	//Set IRQ Vector for PORT A (Vector 59)
-		
-	//Task A
-	Tasks[0].PRIORITY=0;
-	Tasks[0].AUTOSTART=TRUE;
-	Tasks[0].TASK_INITIAL_ADDR=&taskA;
-	//Task B
-	Tasks[1].PRIORITY=1;
-	Tasks[1].AUTOSTART=FALSE;
-	Tasks[1].TASK_INITIAL_ADDR=&taskB;
-	//Task C
-	Tasks[2].PRIORITY=2;
-	Tasks[2].AUTOSTART=FALSE;
-	Tasks[2].TASK_INITIAL_ADDR=&taskC;
+	
+	createTask(0,0,TRUE,&taskA);
+	createTask(1,1,FALSE,&taskB);
+	createTask(2,2,FALSE,&taskC);
+	
+	createAlarm(0,0,20,TRUE,FALSE);		//Alarm 0 will activate task 0 every 20ms recurrently
+	createAlarm(1,1,1000,FALSE,TRUE);	//Alarm 1 will activate task 1 only once after 1000ms
+	createAlarm(2,2,200,TRUE,FALSE);	//Alarm 2 created but not enabled
+	createAlarm(3,2,55,TRUE,FALSE);		//Alarm 3 will activate task 2 every 55ms recurrently
+	createAlarm(4,0,30,TRUE,FALSE);		//Alarm 4 will activate task 0 every 30ms recurrently
+	createAlarm(5,2,150,FALSE,FALSE);	//Alarm 5 will activate task 2 only once after 150ms
+	createAlarm(6,1,40,TRUE,FALSE);		//Alarm 6 will activate task 1 every 40ms recurrently
+	createAlarm(7,0,20,TRUE,FALSE);		//Alarm 7 created but not enabled
+	createAlarm(8,1,20,TRUE,FALSE);		//Alarm 8 created but not enabled
+	createAlarm(9,0,358,FALSE,FALSE);	//Alarm 9 will activate task 0 only once after 358ms
+	
+	createMailbox(0,&taskB,&taskA);		//Mailbox 0 has taskB as producer and TaskA as consumer
 	
 	OS_init();
 	
