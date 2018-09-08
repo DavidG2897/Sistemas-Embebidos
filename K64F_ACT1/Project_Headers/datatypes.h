@@ -10,6 +10,7 @@
 #define __STATIC_INLINE static inline 
 #define TRUE 1
 #define FALSE 0
+#define PORTA_MASK (59%32)
 
 typedef short s16b;
 typedef unsigned char bool;
