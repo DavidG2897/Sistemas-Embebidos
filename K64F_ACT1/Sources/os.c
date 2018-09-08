@@ -74,8 +74,9 @@ __attribute__( ( always_inline ) ) __STATIC_INLINE uint32_t __get_LR(){
 }
 
 void schedule(void){
+	u8b n=0;
 	runningTask=-1;
-	u8b n=0;	//Mailboxes array counter
+		//Mailboxes array counter
 	hpt=0;		//Always assume the highest priority task is the first task in the array
 	i=0;		//Reset counter
 	do{
@@ -84,7 +85,7 @@ void schedule(void){
 				if(Tasks[i].TASK_INITIAL_ADDR==Mailboxes[n]->PRODUCER){		//If waiting task is the mailbox´s producer
 					if(Mailboxes[n]->SEMAPHORE==0) Tasks[i].STATE=READY;		//Check if semaphore is available
 				}else if(Tasks[i].TASK_INITIAL_ADDR==Mailboxes[n]->CONSUMER){	//If waiting task is the mailbox´s consumer
-					if(Mailboxes[n]->SEMAPHORE==1) Tasks[i].STATE=READY;		//Checkf if data is available
+					if(Mailboxes[n]->SEMAPHORE==1) Tasks[i].STATE=READY;		//Check	 if data is available
 				}
 			}while(n++<NUMBER_OF_MAILBOXES-1);
 		}
@@ -124,10 +125,12 @@ void createMailbox(u8b id, void *producer, void *consumer){
 }
 
 bool writeMailbox(u8b id, u32b data){
+	bool busy,claimed;
+	register bool *reg;
 	if(Mailboxes[id]->PRODUCER!=Tasks[runningTask].TASK_INITIAL_ADDR) return 1;	//If the task trying to write to mailbox is not its producer, return 1
 	SYST_CSR|=1<<0;			//Clear TICKINT bit fields in SysTick Control and Status Register to disable interrupt
-	register bool *reg=&Mailboxes[id]->SEMAPHORE;
-	bool busy,claimed;
+	NVICICER1|=0<<PORTA_MASK; 	//Clear IRQ Vector for PORT A (Vector 59)
+	reg=&Mailboxes[id]->SEMAPHORE;
 	asm("MOV R0,%0\n"::"r" (reg):"r0");				//R0 holds semafore address
 	asm("LDREXB R1, [R0]");
 	asm("CPY %0, R1\n":"=r" (busy)::"r1");
@@ -138,22 +141,27 @@ bool writeMailbox(u8b id, u32b data){
 		if(!claimed){						//0 indicates that system function claimed the semaphore address
 			Mailboxes[id]->DATA=data;		//Write data to mailbox
 			SYST_CSR|=1<<1;			//Set TICKINT bit fields in SysTick Control and Status Register to enable interrupt
+			NVICISER1|=1<<PORTA_MASK; 	//Set IRQ Vector for PORT A (Vector 59)
 			return claimed;
 		}else{
 			SYST_CSR|=1<<1;			//Set TICKINT bit fields in SysTick Control and Status Register to enable interrupt
+			NVICISER1|=1<<PORTA_MASK; 	//Set IRQ Vector for PORT A (Vector 59)
 			return claimed;
 		}
 	}else{
 		SYST_CSR|=1<<1;			//Set TICKINT bit fields in SysTick Control and Status Register to enable interrupt
+		NVICISER1|=1<<PORTA_MASK; 	//Set IRQ Vector for PORT A (Vector 59)
 		return busy;
 	}
 }
 
 u32b readMailbox(u8b id,u32b *addr){
+	bool available,claimed;
+	register bool *reg;
 	if(Mailboxes[id]->CONSUMER!=Tasks[runningTask].TASK_INITIAL_ADDR) return 1;	//If task trying to read mailbox is not its consumer, return 0
 	SYST_CSR|=1<<0;			//Clear TICKINT bit fields in SysTick Control and Status Register to disable interrupt
-	register bool *reg=&Mailboxes[id]->SEMAPHORE;
-	bool available,claimed;
+	NVICICER1|=0<<PORTA_MASK; 	//Clear IRQ Vector for PORT A (Vector 59)
+	reg=&Mailboxes[id]->SEMAPHORE;
 	asm("MOV R0,%0\n"::"r" (reg):"r0");				//R0 holds semafore address
 	asm("LDREXB R1, [R0]");
 	asm("CPY %0, R1\n":"=r" (available)::"r1");
@@ -164,31 +172,38 @@ u32b readMailbox(u8b id,u32b *addr){
 		if(!claimed){					//0 indicates that system function claimed the semaphore address
 			*addr=Mailboxes[id]->DATA;	//Write mailbox data to desired address
 			SYST_CSR|=1<<1;				//Set TICKINT bit fields in SysTick Control and Status Register to enable interrupt
+			NVICISER1|=1<<PORTA_MASK; 	//Set IRQ Vector for PORT A (Vector 59)
 			return claimed;	
 		}else{
 			SYST_CSR|=1<<1;			//Set TICKINT bit fields in SysTick Control and Status Register to enable interrupt
+			NVICISER1|=1<<PORTA_MASK; 	//Set IRQ Vector for PORT A (Vector 59)
 			return claimed;
 		}
 	}else{
 		SYST_CSR|=1<<1;						//Set TICKINT bit fields in SysTick Control and Status Register to enable interrupt
+		NVICISER1|=1<<PORTA_MASK; 	//Set IRQ Vector for PORT A (Vector 59)
 		return !available;
 	}
 }
 
 void wait(void){
+	volatile register u32b reg;
 	SYST_CSR|=1<<0;			//Clear TICKINT bit fields in SysTick Control and Status Register to disable interrupt
+	NVICICER1|=0<<PORTA_MASK; 	//Clear IRQ Vector for PORT A (Vector 59)
 	Tasks[runningTask].TASK_SP = __get_SP()+0x18; //Save SP RAM address for realignment when returning
 	Tasks[runningTask].CONTEXT[6] = __get_LR();   //Save return address
 	Tasks[runningTask].STATE=WAIT;
 	schedule();
 	if(runningTask!=-1){
 		SYST_CSR|=1<<1;		//Set TICKINT bit fields in SysTick Control and Status Register to enable interrupt
+		NVICISER1|=1<<PORTA_MASK; 	//Set IRQ Vector for PORT A (Vector 59)
 		Tasks[runningTask].TASK_INITIAL_ADDR();
 	}else{
-		volatile register u32b reg = main_sp;
+		reg = main_sp;
 		asm("MOV SP,%0"::"r" (reg):"sp");
 		//We enable interrupts here because this line uses registers R2 and R3.
 		SYST_CSR|=1<<1;			//Re-enable SysTick interrupt to allow interruptions after pending task is activated
+		NVICISER1|=1<<PORTA_MASK; 	//Set IRQ Vector for PORT A (Vector 59)
 		reg=main_pc;
 		__ASM volatile ("MOV R7, SP\n");				//Update register R7, core uses it as reference to SP
 		__ASM volatile ("MOV PC, %0\n" : "=r" (reg));	//Overwrite PC to go to return address of pending task
@@ -196,8 +211,9 @@ void wait(void){
 }
 
 void alarmSweep(void){
-	SYST_CSR|=1<<0;			//Clear TICKINT bit fields in SysTick Control and Status Register to disable interrupt
 	u8b n=0;
+	SYST_CSR|=1<<0;			//Clear TICKINT bit fields in SysTick Control and Status Register to disable interrupt
+	NVICICER1|=0<<PORTA_MASK; 	//Clear IRQ Vector for PORT A (Vector 59)
 	do{
 		if(Alarms[n].ENABLE){
 			Alarms[n].CNT--;
@@ -213,12 +229,14 @@ void alarmSweep(void){
 	}while(n++<NUMBER_OF_ALARMS-1);
 	schedule();
 	SYST_CSR|=1<<1;		//Set TICKINT bit fields in SysTick Control and Status Register to enable interrupt
+	NVICISER1|=1<<PORTA_MASK; 	//Set IRQ Vector for PORT A (Vector 59)
 	if(runningTask!=-1) Tasks[runningTask].TASK_INITIAL_ADDR();
 }
 
-void saveContext(void){	
-	SYST_CSR|=1<<0;			//Clear TICKINT bit fields in SysTick Control and Status Register to disable interrupt
+void saveContext(void){
 	volatile register u32b reg;
+	SYST_CSR|=1<<0;			//Clear TICKINT bit fields in SysTick Control and Status Register to disable interrupt
+	NVICICER1|=0<<PORTA_MASK; 	//Clear IRQ Vector for PORT A (Vector 59)
 	isr_sp = (u32b*) __get_SP()+0x4; 		
 	__ASM volatile("MOV %0,%[isr_sp]\n" : "=r" (reg) : [isr_sp] "rm" (*isr_sp));
 	if(runningTask!=-1){
@@ -236,6 +254,7 @@ void saveContext(void){
 		Tasks[runningTask].STATE=READY;
 	}
 	SYST_CSR|=1<<1;			//Set TICKINT bit fields in SysTick Control and Status Register to enable interrupt
+	NVICISER1|=1<<PORTA_MASK; 	//Set IRQ Vector for PORT A (Vector 59)
 }
 
 void restoreContext(void){
@@ -255,6 +274,7 @@ void restoreContext(void){
 	asm ("MOV LR, %0\n" : "=r" (reg));	//Load LR context into LR
 	//We enable interrupts here so R3 does not get overwritten after the context has been restored
 	SYST_CSR|=1<<1;									//Set TICKINT bit fields in SysTick Control and Status Register to enable interrupt
+	NVICISER1|=1<<PORTA_MASK; 	//Set IRQ Vector for PORT A (Vector 59)
 	reg=Tasks[runningTask].CONTEXT[3];						//Get R3 context
 	asm ("MOV R3, %0\n" : "=r" (reg));	//Load R3 context into R3
 	asm ("MOV R2, R8\n");				//Load R8 into R2 for context restoring
@@ -263,6 +283,7 @@ void restoreContext(void){
 }
 
 void OS_init(void){
+	NVICICER1|=0<<PORTA_MASK; 	//Clear IRQ Vector for PORT A (Vector 59)
 	main_sp = __get_SP()+0x10;	
 	main_pc = __get_LR();   //Save return address
 	i=0;	//Reset counter
@@ -270,14 +291,16 @@ void OS_init(void){
 		if(Tasks[i].AUTOSTART) Tasks[i].STATE=READY;	//Set READY state to AUTOSTART tasks
 	}while(i++<TASKS_LIMIT);
 	schedule();
-	SYST_RVR=16777;		//Reload value range 1 - 16,777,215, 1ms timebase
+	/*SYST_RVR=16777;		//Reload value range 1 - 16,777,215, 1ms timebase
 	SYST_CVR=0;			//Write to SYST_CVR to reset current counter value and clear CSR COUNTFLAG
-	SYST_CSR|=7;		//Set CLKSOURCE to processor clock, enable interrupts and SysTick counter
+	SYST_CSR|=7;		//Set CLKSOURCE to processor clock, enable interrupts and SysTick counter*/
+	NVICISER1|=1<<PORTA_MASK; 	//Set IRQ Vector for PORT A (Vector 59)
 	if(Tasks[runningTask].STATE==RUN) Tasks[runningTask].TASK_INITIAL_ADDR();
 }
 
 void activateTask(u8b index,bool isr){
-	SYST_CSR|=0<<1;		//Clear TICKINT bit field in SysTick Control and Status Register to disable interrupt
+	//SYST_CSR|=0<<1;		//Clear TICKINT bit field in SysTick Control and Status Register to disable interrupt
+	NVICICER1|=0<<PORTA_MASK; 	//Clear IRQ Vector for PORT A (Vector 59)
 	if(!isr){
 		Tasks[runningTask].TASK_SP = __get_SP()+0x18; //Save SP RAM address for realignment when returning
 		Tasks[runningTask].CONTEXT[6] = __get_LR();   //Save return address to assign to running task later
@@ -285,17 +308,19 @@ void activateTask(u8b index,bool isr){
 	Tasks[runningTask].STATE=READY;			 //Return running task to READY state
 	if(Tasks[index].STATE==IDLE) Tasks[index].STATE=READY;
 	schedule();
-	SYST_CSR|=1<<1;		//Set TICKINT bit fields in SysTick Control and Status Register to enable interrupt
+	//SYST_CSR|=1<<1;		//Set TICKINT bit fields in SysTick Control and Status Register to enable interrupt
 	if(Tasks[runningTask].INTERRUPTED){					//Restore context in the task was interrupted
 		Tasks[runningTask].INTERRUPTED=FALSE;			//Reset task´s INTERRUPTED flag
 		restoreContext();
 	}else{
+		NVICISER1|=1<<PORTA_MASK; 	//Set IRQ Vector for PORT A (Vector 59)
 		Tasks[runningTask].TASK_INITIAL_ADDR();
 	}
 }
 
 void chainTask(u8b index){
-	SYST_CSR|=0<<1;		//Clear TICKINT bit field in SysTick Control and Status Register to disable interrupt
+	//SYST_CSR|=0<<1;		//Clear TICKINT bit field in SysTick Control and Status Register to disable interrupt
+	NVICICER1|=0<<PORTA_MASK; 	//Clear IRQ Vector for PORT A (Vector 59)
 	Tasks[runningTask].STATE=IDLE;
 	Tasks[index].STATE=READY;
 	schedule();
@@ -303,12 +328,15 @@ void chainTask(u8b index){
 		Tasks[runningTask].INTERRUPTED=FALSE;			//Reset task´s INTERRUPTED flag
 		restoreContext();
 	}
-	SYST_CSR|=1<<1;		//Set TICKINT bit fields in SysTick Control and Status Register to enable interrupt
+	//SYST_CSR|=1<<1;		//Set TICKINT bit fields in SysTick Control and Status Register to enable interrupt
+	NVICISER1|=1<<PORTA_MASK; 	//Set IRQ Vector for PORT A (Vector 59)
 	if(Tasks[runningTask].STATE==RUN) Tasks[runningTask].TASK_INITIAL_ADDR();
 }
 
 void terminateTask(void){
-	SYST_CSR|=0<<1;		//Clear TICKINT bit field in SysTick Control and Status Register to disable interrupt
+	volatile register u32b reg;
+	//SYST_CSR|=0<<1;		//Clear TICKINT bit field in SysTick Control and Status Register to disable interrupt
+	NVICICER1|=0<<PORTA_MASK; 	//Clear IRQ Vector for PORT A (Vector 59)
 	Tasks[runningTask].STATE=IDLE;
 	i=0;
 	schedule();
@@ -317,19 +345,21 @@ void terminateTask(void){
 			Tasks[runningTask].INTERRUPTED=FALSE;			//Reset task´s INTERRUPTED flag
 			restoreContext();
 		}else{
-			volatile register u32b reg = Tasks[runningTask].TASK_SP;
+			reg = Tasks[runningTask].TASK_SP;
 			__ASM volatile ("MOV SP, %0\n" : "=r" (reg));		//Return SP top to the desired task stack address
 			//We enable interrupts here because this line uses registers R2 and R3.
-			SYST_CSR|=1<<1;			//Re-enable SysTick interrupt to allow interruptions after pending task is activated
+			//SYST_CSR|=1<<1;			//Re-enable SysTick interrupt to allow interruptions after pending task is activated
+			NVICISER1|=1<<PORTA_MASK; 	//Set IRQ Vector for PORT A (Vector 59)
 			reg=Tasks[runningTask].CONTEXT[6];
 			__ASM volatile ("MOV R7, SP\n");				//Update register R7, core uses it as reference to SP
 			__ASM volatile ("MOV PC, %0\n" : "=r" (reg));	//Overwrite PC to go to return address of pending task
 		}
 	}else{
-		volatile register u32b reg = main_sp;
+		reg = main_sp;
 		asm("MOV SP,%0"::"r" (reg):"sp");
 		//We enable interrupts here because this line uses registers R2 and R3.
-		SYST_CSR|=1<<1;			//Re-enable SysTick interrupt
+		//SYST_CSR|=1<<1;			//Re-enable SysTick interrupt
+		NVICISER1|=1<<PORTA_MASK; 	//Set IRQ Vector for PORT A (Vector 59)
 		reg=main_pc;
 		__ASM volatile ("MOV R7, SP\n");				//Update register R7, core uses it as reference to SP
 		__ASM volatile ("MOV PC, %0\n" : "=r" (reg));	//Overwrite PC to go to return address of pending task
